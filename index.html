@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>造船梦工厂3D虚拟实验室</title>
+    <style>
+        body { margin: 0; background-color: #f0f2f5; font-family: 'Microsoft YaHei', sans-serif; overflow: hidden; }
+        #ui-layer {
+            position: absolute; top: 15px; left: 15px; z-index: 10;
+            background: rgba(255, 255, 255, 0.95); padding: 15px 20px;
+            border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            width: 320px; max-height: 90vh; overflow-y: auto;
+        }
+        h1 { font-size: 20px; margin: 0 0 10px 0; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 5px; }
+        p { font-size: 13px; color: #666; line-height: 1.5; margin-bottom: 10px; }
+        
+        .group-title { font-size: 15px; color: #34495e; font-weight: bold; margin: 15px 0 8px 0; border-left: 4px solid #e74c3c; padding-left: 8px; }
+        .controls { display: flex; flex-direction: column; gap: 8px; }
+        
+        button {
+            padding: 10px; border: none; border-radius: 6px; cursor: pointer;
+            font-weight: bold; color: white; transition: 0.3s; font-size: 13px;
+        }
+        /* 橡皮泥按钮配色 */
+        .btn-solid { background: #e67e22; }
+        .btn-bowl { background: #27ae60; }
+        .btn-boat { background: #2980b9; }
+        /* 铝箔纸按钮配色 */
+        .btn-foil-sheet { background: #95a5a6; color: #2c3e50; }
+        .btn-foil-box { background: #7f8c8d; }
+        .btn-foil-boat { background: #34495e; }
+        
+        .btn-reset { background: #c0392b; margin-top: 10px; }
+        button:hover { filter: brightness(1.1); transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        
+        .legend { margin-top: 15px; font-size: 12px; color: #c0392b; display: flex; align-items: center; font-weight: bold; background: rgba(231, 76, 60, 0.1); padding: 8px; border-radius: 4px; }
+        .legend-box { width: 14px; height: 14px; background: rgba(255,0,0,0.4); margin-right: 8px; border: 1px solid red; }
+        
+        /* 滚动条美化 */
+        #ui-layer::-webkit-scrollbar { width: 6px; }
+        #ui-layer::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+
+        .hint {
+            position: absolute; bottom: 20px; width: 100%; text-align: center;
+            color: #555; font-size: 13px; pointer-events: none; text-shadow: 1px 1px 2px white;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <h1>造船梦工厂3D虚拟实验室</h1>
+    <p>观察不同形状、不同材质的小船，为什么它们都能由沉到浮？能浮起来的小船有什么共同特征？</p>
+    
+    <div class="legend">
+        <div class="legend-box"></div> 红色区域：占据的总空间(含中空)
+    </div>
+
+    <div class="group-title">实验组 A：橡皮泥造船</div>
+    <div class="controls">
+        <button class="btn-solid" onclick="updateExperiment('solid')">1. 浅黄橡皮泥（实心球）</button>
+        <button class="btn-bowl" onclick="updateExperiment('bowl')">2. 浅黄橡皮泥（碗状）</button>
+        <button class="btn-boat" onclick="updateExperiment('boat')">3. 浅黄橡皮泥（船状）</button>
+    </div>
+
+    <div class="group-title">实验组 B：铝箔纸造船</div>
+    <div class="controls">
+        <button class="btn-foil-sheet" onclick="updateExperiment('foil-sheet')">4. 铝箔纸（平铺纸张）</button>
+        <button class="btn-foil-box" onclick="updateExperiment('foil-box')">5. 铝箔纸（空心长方体）</button>
+        <button class="btn-foil-boat" onclick="updateExperiment('foil-boat')">6. 铝箔纸（折叠船型）</button>
+    </div>
+
+    <button class="btn-reset" onclick="updateExperiment('reset')" style="width: 100%;">重置实验水槽</button>
+</div>
+
+<div class="hint">操作指南：🖱️ 左键旋转视角 | 右键平移 | 滚轮缩放</div>
+
+<!-- 加载 Three.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+    let scene, camera, renderer, controls;
+    let water, tank;
+    let currentClay = null;
+
+    // 预设参数
+    const config = {
+        baseWaterY: 4,      
+        tankSize: { w: 10, h: 12, d: 10 }
+    };
+
+    init();
+    animate();
+
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf0f2f5);
+
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(18, 15, 22);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.7);
+        hemiLight.position.set(0, 20, 0);
+        scene.add(hemiLight);
+
+        const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        mainLight.position.set(10, 20, 15);
+        scene.add(mainLight);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+
+        const tankGeo = new THREE.BoxGeometry(config.tankSize.w, config.tankSize.h, config.tankSize.d);
+        const tankMat = new THREE.MeshStandardMaterial({
+            color: 0xffffff, transparent: true, opacity: 0.1, side: THREE.DoubleSide, roughness: 0.1,
+            depthWrite: false 
+        });
+        tank = new THREE.Mesh(tankGeo, tankMat);
+        tank.position.y = config.tankSize.h / 2;
+        scene.add(tank);
+
+        const edges = new THREE.EdgesGeometry(tankGeo);
+        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x888888 }));
+        line.position.copy(tank.position);
+        scene.add(line);
+
+        for (let i = 1; i <= 11; i++) {
+            const lineGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(-config.tankSize.w/2, i, config.tankSize.d/2),
+                new THREE.Vector3(-config.tankSize.w/2 + 0.8, i, config.tankSize.d/2)
+            ]);
+            const mark = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x333333 }));
+            scene.add(mark);
+        }
+
+        const waterGeo = new THREE.BoxGeometry(config.tankSize.w - 0.05, 1, config.tankSize.d - 0.05);
+        const waterMat = new THREE.MeshStandardMaterial({
+            color: 0x3498db, transparent: true, opacity: 0.6, roughness: 0.1,
+            depthWrite: false 
+        });
+        water = new THREE.Mesh(waterGeo, waterMat);
+        water.position.y = config.baseWaterY / 2;
+        water.scale.y = config.baseWaterY;
+        scene.add(water);
+
+        window.addEventListener('resize', onWindowResize, false);
+    }
+
+    function createClay(type) {
+        if (currentClay) scene.remove(currentClay);
+        if (type === 'reset') {
+            animateProperty(water.scale, 'y', config.baseWaterY, 800);
+            animateProperty(water.position, 'y', config.baseWaterY / 2, 800);
+            currentClay = null;
+            return;
+        }
+        
+        const group = new THREE.Group();
+        
+        const clayMat = new THREE.MeshStandardMaterial({ color: 0xfceba7, roughness: 0.7, side: THREE.DoubleSide }); 
+        const foilMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.75, roughness: 0.2, side: THREE.DoubleSide });
+        const volMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0, depthWrite: false });
+
+        let targetMeshMat = type.includes('foil') ? foilMat : clayMat;
+        let clayMesh, volMesh, targetY, waterTargetScale;
+
+        // --- 橡皮泥实验组 ---
+        if (type === 'solid') {
+            clayMesh = new THREE.Mesh(new THREE.SphereGeometry(1.3, 32, 32), targetMeshMat);
+            volMesh = new THREE.Mesh(new THREE.SphereGeometry(1.35, 32, 32), volMat);
+            targetY = 1.3; 
+            waterTargetScale = config.baseWaterY + 0.2; 
+        } 
+        else if (type === 'bowl') {
+            const pts = [new THREE.Vector2(0,0), new THREE.Vector2(2.2,0), new THREE.Vector2(2.5, 2.2), new THREE.Vector2(2.35, 2.2), new THREE.Vector2(2.0, 0.2), new THREE.Vector2(0, 0.2)];
+            clayMesh = new THREE.Mesh(new THREE.LatheGeometry(pts, 32), targetMeshMat);
+            volMesh = new THREE.Mesh(new THREE.CylinderGeometry(2.52, 2.2, 2.2, 32), volMat);
+            volMesh.position.y = 1.1; 
+            targetY = 4.2; 
+            waterTargetScale = config.baseWaterY + 0.8; 
+        }
+        else if (type === 'boat') {
+            const pts = [new THREE.Vector2(0,0), new THREE.Vector2(1.8,0), new THREE.Vector2(2.4, 1.8), new THREE.Vector2(2.2, 1.8), new THREE.Vector2(1.6, 0.2), new THREE.Vector2(0, 0.2)];
+            clayMesh = new THREE.Mesh(new THREE.LatheGeometry(pts, 32), targetMeshMat);
+            clayMesh.scale.set(0.7, 0.8, 1.4); 
+            volMesh = new THREE.Mesh(new THREE.CylinderGeometry(2.42, 1.8, 1.8, 32), volMat);
+            volMesh.position.y = 0.72; 
+            volMesh.scale.set(0.7, 0.8, 1.4); 
+            targetY = 3.6; 
+            waterTargetScale = config.baseWaterY + 0.6; 
+        }
+        // --- 铝箔纸实验组 ---
+        else if (type === 'foil-sheet') {
+            clayMesh = new THREE.Mesh(new THREE.BoxGeometry(3, 0.02, 3), targetMeshMat);
+            volMesh = new THREE.Mesh(new THREE.BoxGeometry(3.05, 0.05, 3.05), volMat);
+            targetY = 0.02; 
+            waterTargetScale = config.baseWaterY + 0.02; 
+        }
+        else if (type === 'foil-box') {
+            const pts = [new THREE.Vector2(0,0), new THREE.Vector2(1.6,0), new THREE.Vector2(1.6, 1.5), new THREE.Vector2(1.58, 1.5), new THREE.Vector2(1.58, 0.02), new THREE.Vector2(0, 0.02)];
+            clayMesh = new THREE.Mesh(new THREE.LatheGeometry(pts, 4), targetMeshMat);
+            clayMesh.rotation.y = Math.PI / 4; 
+            
+            volMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.62, 1.62, 1.5, 4), volMat);
+            volMesh.rotation.y = Math.PI / 4;
+            volMesh.position.y = 0.75;
+            
+            targetY = 3.95; 
+            waterTargetScale = config.baseWaterY + 0.1; 
+        }
+        else if (type === 'foil-boat') {
+            const pts = [new THREE.Vector2(0,0), new THREE.Vector2(1.4,0), new THREE.Vector2(1.8, 1.2), new THREE.Vector2(1.78, 1.2), new THREE.Vector2(1.38, 0.02), new THREE.Vector2(0, 0.02)];
+            clayMesh = new THREE.Mesh(new THREE.LatheGeometry(pts, 24), targetMeshMat);
+            clayMesh.scale.set(0.65, 0.8, 1.3); 
+            
+            volMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.82, 1.42, 1.2, 24), volMat);
+            volMesh.scale.set(0.65, 0.8, 1.3);
+            volMesh.position.y = 0.48; 
+            
+            targetY = 3.9; 
+            waterTargetScale = config.baseWaterY + 0.08;
+        }
+
+        volMesh.renderOrder = 10;
+
+        const targetVolScale = volMesh.scale.clone();
+        volMesh.scale.set(0.01, 0.01, 0.01);
+
+        group.add(clayMesh);
+        group.add(volMesh);
+        group.position.y = 12; 
+        scene.add(group);
+        currentClay = group;
+
+        const startY = 12;
+        const duration = 1200;
+        const startTime = performance.now();
+        
+        water.scale.y = config.baseWaterY;
+        water.position.y = config.baseWaterY / 2;
+
+        function step() {
+            const now = performance.now();
+            const p = Math.min((now - startTime) / duration, 1);
+            const easeP = p * (2 - p); 
+            
+            const currentY = startY + (targetY - startY) * easeP;
+            group.position.y = currentY;
+
+            const waterTriggerHeight = config.baseWaterY + 1.2; 
+            if (currentY < waterTriggerHeight) {
+                let waterP = (waterTriggerHeight - currentY) / (waterTriggerHeight - targetY);
+                waterP = Math.max(0, Math.min(waterP, 1));
+                let currentWaterScale = config.baseWaterY + (waterTargetScale - config.baseWaterY) * waterP;
+                water.scale.y = currentWaterScale;
+                water.position.y = currentWaterScale / 2;
+            }
+
+            if (p < 1) {
+                requestAnimationFrame(step);
+            } else {
+                setTimeout(() => {
+                    animateVolumeEmphasis(volMesh, volMat, targetVolScale);
+                }, 300);
+            }
+        }
+        requestAnimationFrame(step);
+    }
+
+    function animateVolumeEmphasis(mesh, material, targetScale) {
+        const duration = 700; 
+        const startTime = performance.now();
+
+        function step() {
+            const now = performance.now();
+            const p = Math.min((now - startTime) / duration, 1);
+            
+            const c1 = 1.70158;
+            const c3 = c1 + 1;
+            const ease = 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
+
+            material.opacity = Math.min(p * 1.5, 0.55); 
+
+            mesh.scale.set(
+                targetScale.x * Math.max(0, ease),
+                targetScale.y * Math.max(0, ease),
+                targetScale.z * Math.max(0, ease)
+            );
+
+            if (p < 1) requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+    }
+
+    function animateProperty(obj, prop, target, duration) {
+        const start = obj[prop];
+        const startTime = performance.now();
+        function step() {
+            const now = performance.now();
+            const progress = Math.min((now - startTime) / duration, 1);
+            const easeP = progress * (2 - progress);
+            obj[prop] = start + (target - start) * easeP;
+            if (progress < 1) requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+    }
+
+    function updateExperiment(type) {
+        createClay(type);
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+    }
+</script>
+</body>
+</html>
